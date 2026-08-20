@@ -8,6 +8,14 @@ Deploy free:   push to GitHub -> https://share.streamlit.io (Streamlit Community
 """
 
 import os
+import sys
+
+try:
+    __import__("pysqlite3")
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+except ImportError:
+    pass
+
 import tempfile
 from pathlib import Path
 
