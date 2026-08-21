@@ -64,6 +64,7 @@ def get_embeddings():
 
 @st.cache_resource(show_spinner=False)
 def get_vectorstore():
+    os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
     return Chroma(
         persist_directory=PERSIST_DIRECTORY,
         embedding_function=get_embeddings(),
