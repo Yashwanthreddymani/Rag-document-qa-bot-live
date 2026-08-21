@@ -1,7 +1,8 @@
 """
 RAG Document Q&A Bot — Web version
 Upload documents, then ask questions about them. Answers are grounded in the
-uploaded content, with source citations.
+uploaded content, with source citations. Also handles greetings, small talk,
+and general questions naturally.
 
 Run locally:   streamlit run app.py
 Deploy free:   push to GitHub -> https://share.streamlit.io (Streamlit Community Cloud)
@@ -33,7 +34,7 @@ from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, Te
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-from langchain_groq import ChatGroq
+from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
@@ -43,10 +44,12 @@ load_dotenv()
 # ==================== CONFIGURATION ====================
 PERSIST_DIRECTORY = "chroma_db"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-LLM_MODEL = "openai/gpt-oss-120b"   # Groq-hosted model, fast + free tier
+LLM_MODEL = "claude-sonnet-4-6"       # Anthropic-hosted model, used for chat answers
+WHISPER_MODEL = "whisper-large-v3-turbo"  # Groq-hosted, used only for voice transcription
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 TOP_K = 4
+MAX_HISTORY_TURNS = 6
 SUPPORTED_TYPES = ["pdf", "docx", "txt"]
 # ======================================================
 
@@ -67,18 +70,36 @@ def get_vectorstore():
 
 
 def get_llm(api_key: str):
-    return ChatGroq(model=LLM_MODEL, temperature=0.3, api_key=api_key)
+    return ChatAnthropic(model=LLM_MODEL, temperature=0.3, api_key=api_key)
 
 
 PROMPT = ChatPromptTemplate.from_template(
-    """You are a helpful assistant. Answer the question using ONLY the provided context.
-If the answer isn't in the context, say "I don't have enough information in the documents to answer this."
-Always mention which source(s) you used.
+    """You are a warm, helpful, knowledgeable assistant — like talking to a
+knowledgeable friend, not a rigid search tool. Follow these rules:
 
-Context (with sources):
+- Greetings and small talk ("hi", "good morning", "how are you", "thanks"):
+  reply naturally and briefly, like a person would.
+- Questions about the uploaded documents: answer using the provided context
+  below, and mention which source(s) you used. If the context doesn't cover
+  it, say so plainly, but still try to be helpful (e.g. suggest what info
+  might be missing or what to upload).
+- Any other question — general knowledge, advice, explanations, opinions,
+  casual conversation: just answer it directly and helpfully, the way you
+  normally would. Don't refuse or redirect to "please ask about the
+  documents" — only the earlier bullet about missing context applies when
+  the question is actually about the documents.
+- Use the conversation history for context on follow-ups and things the
+  user already told you.
+- Keep answers natural length: short for simple things, longer when the
+  question actually needs detail. Don't pad with unnecessary caveats.
+
+Conversation history:
+{history}
+
+Context (with sources) — use only when the question is about the uploaded documents:
 {context}
 
-Question: {question}
+User: {question}
 
 Answer:"""
 )
@@ -92,6 +113,16 @@ def format_docs(docs):
         page_info = f" (page {int(page) + 1})" if page != "" else ""
         formatted.append(f"Source: {source}{page_info}\n{doc.page_content}")
     return "\n\n---\n\n".join(formatted)
+
+
+def format_history(messages, max_turns=MAX_HISTORY_TURNS):
+    """Turn the last few chat turns into plain text for the prompt."""
+    recent = messages[-(max_turns * 2):]  # keep last N user+assistant pairs
+    lines = []
+    for m in recent:
+        role = "User" if m["role"] == "user" else "Assistant"
+        lines.append(f"{role}: {m['content']}")
+    return "\n".join(lines) if lines else "(no earlier messages)"
 
 
 def get_upload_history():
@@ -120,12 +151,12 @@ def get_upload_history():
     return sorted(files.values(), key=lambda f: f["uploaded_at"], reverse=True)
 
 
-def transcribe_audio(audio_bytes: bytes, api_key: str) -> str:
+def transcribe_audio(audio_bytes: bytes, groq_api_key: str) -> str:
     """Send recorded audio to Groq's Whisper model and return the transcribed text."""
-    client = Groq(api_key=api_key)
+    client = Groq(api_key=groq_api_key)
     transcript = client.audio.transcriptions.create(
         file=("question.wav", audio_bytes),
-        model="whisper-large-v3-turbo",
+        model=WHISPER_MODEL,
     )
     return transcript.text.strip()
 
@@ -192,11 +223,21 @@ def index_uploaded_files(uploaded_files):
 with st.sidebar:
     st.header("⚙️ Setup")
 
-    api_key = os.environ.get("GROQ_API_KEY", "")
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
-        api_key = st.text_input("Groq API key", type="password", help="Get a free key at console.groq.com")
+        api_key = st.text_input("Anthropic API key", type="password", help="Get a key at console.anthropic.com")
     else:
-        st.success("API key loaded from environment")
+        st.success("Anthropic API key loaded from environment")
+
+    groq_api_key = os.environ.get("GROQ_API_KEY", "")
+    if not groq_api_key:
+        groq_api_key = st.text_input(
+            "Groq API key (optional — for voice input)",
+            type="password",
+            help="Get a free key at console.groq.com. Only needed if you want to ask questions by voice.",
+        )
+    else:
+        st.success("Groq API key loaded from environment")
 
     st.divider()
     st.header("📂 Upload documents")
@@ -236,10 +277,10 @@ with st.sidebar:
 
 # ---------- Main: chat ----------
 st.title("📚 RAG Document Q&A Bot")
-st.caption("Upload documents in the sidebar, then ask questions about them below.")
+st.caption("Upload documents in the sidebar, then chat below — ask about your documents or anything else.")
 
 if not api_key:
-    st.info("👈 Enter a Groq API key in the sidebar to get started. It's free at console.groq.com")
+    st.info("👈 Enter an Anthropic API key in the sidebar to get started. Get one at console.anthropic.com")
     st.stop()
 
 if "messages" not in st.session_state:
@@ -251,20 +292,23 @@ for msg in st.session_state.messages:
 
 col1, col2 = st.columns([6, 1])
 with col1:
-    typed_question = st.chat_input("Ask a question about your documents...")
+    typed_question = st.chat_input("Ask me anything, or ask about your documents...")
 with col2:
     audio = mic_recorder(start_prompt="🎤", stop_prompt="⏹️", just_once=True, key="mic")
 
 question = typed_question
 
 if audio and audio.get("bytes"):
-    with st.spinner("Transcribing your question..."):
-        try:
-            question = transcribe_audio(audio["bytes"], api_key)
-            st.caption(f"🎤 Heard: \"{question}\"")
-        except Exception as e:
-            st.error(f"❌ Could not transcribe audio: {e}")
-            question = None
+    if not groq_api_key:
+        st.error("❌ Voice input needs a Groq API key (for transcription). Add one in the sidebar.")
+    else:
+        with st.spinner("Transcribing your question..."):
+            try:
+                question = transcribe_audio(audio["bytes"], groq_api_key)
+                st.caption(f"🎤 Heard: \"{question}\"")
+            except Exception as e:
+                st.error(f"❌ Could not transcribe audio: {e}")
+                question = None
 
 if question:
     st.session_state.messages.append({"role": "user", "content": question})
@@ -278,15 +322,22 @@ if question:
                 retriever = vectorstore.as_retriever(search_kwargs={"k": TOP_K})
                 llm = get_llm(api_key)
 
+                # history excludes the message we just added, so it's only *prior* turns
+                history_text = format_history(st.session_state.messages[:-1])
+
                 rag_chain = (
-                    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+                    {
+                        "context": retriever | format_docs,
+                        "history": lambda _: history_text,
+                        "question": RunnablePassthrough(),
+                    }
                     | PROMPT
                     | llm
                     | StrOutputParser()
                 )
                 answer = rag_chain.invoke(question)
             except Exception as e:
-                answer = f"❌ Error: {e}\n\nMake sure you've uploaded and indexed at least one document, and that your API key is valid."
+                answer = f"❌ Error: {e}\n\nMake sure your API key is valid, and if this is a document question, that you've uploaded and indexed at least one file."
 
         st.markdown(answer)
         if speak_answers:
