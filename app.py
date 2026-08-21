@@ -219,21 +219,12 @@ def index_uploaded_files(uploaded_files):
     return len(all_chunks)
 
 
-# ---------- Sidebar: setup + upload ----------
+# ---------- Sidebar: upload + history + voice ----------
 with st.sidebar:
-    st.header("⚙️ Setup")
-
+    # Groq key is read silently from Streamlit Cloud secrets / environment.
+    # No UI is shown for it — visitors never see or enter a key.
     groq_api_key = os.environ.get("GROQ_API_KEY", "")
-    if not groq_api_key:
-        groq_api_key = st.text_input(
-            "Groq API key",
-            type="password",
-            help="Get a free key at console.groq.com. Used for both chat answers and voice transcription.",
-        )
-    else:
-        st.success("Groq API key loaded from environment")
 
-    st.divider()
     st.header("📂 Upload documents")
     uploaded_files = st.file_uploader(
         "Add PDF, DOCX, or TXT files to the knowledge base",
@@ -274,7 +265,9 @@ st.title("📚 RAG Document Q&A Bot")
 st.caption("Upload documents in the sidebar, then chat below — ask about your documents or anything else.")
 
 if not groq_api_key:
-    st.info("👈 Enter a Groq API key in the sidebar to get started. Get a free one at console.groq.com")
+    # This should only ever show up if the site owner forgot to set the
+    # GROQ_API_KEY secret in Streamlit Cloud — visitors never enter a key.
+    st.error("This app isn't configured correctly. Please contact the site owner.")
     st.stop()
 
 if "messages" not in st.session_state:
