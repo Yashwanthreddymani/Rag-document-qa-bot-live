@@ -29,6 +29,7 @@ import streamlit.components.v1 as components
 from dotenv import load_dotenv
 from streamlit_mic_recorder import mic_recorder
 from groq import Groq
+import chromadb
 
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -65,10 +66,23 @@ def get_embeddings():
 @st.cache_resource(show_spinner=False)
 def get_vectorstore():
     os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
-    return Chroma(
-        persist_directory=PERSIST_DIRECTORY,
-        embedding_function=get_embeddings(),
-    )
+    try:
+        client = chromadb.PersistentClient(path=PERSIST_DIRECTORY)
+        return Chroma(
+            client=client,
+            embedding_function=get_embeddings(),
+        )
+    except Exception:
+        # Directory exists but is corrupted/incomplete (e.g. from an interrupted
+        # first run on Streamlit Cloud's ephemeral disk) — wipe and rebuild once.
+        import shutil
+        shutil.rmtree(PERSIST_DIRECTORY, ignore_errors=True)
+        os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
+        client = chromadb.PersistentClient(path=PERSIST_DIRECTORY)
+        return Chroma(
+            client=client,
+            embedding_function=get_embeddings(),
+        )
 
 
 def get_llm(api_key: str):
