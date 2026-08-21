@@ -62,6 +62,7 @@ def get_embeddings():
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
 
+@st.cache_resource(show_spinner=False)
 def get_vectorstore():
     return Chroma(
         persist_directory=PERSIST_DIRECTORY,
