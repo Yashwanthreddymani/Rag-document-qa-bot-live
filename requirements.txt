@@ -2,10 +2,10 @@ pysqlite3-binary==0.5.4
 streamlit==1.40.1
 streamlit-mic-recorder==0.0.8
 groq==0.37.1
-anthropic==0.40.0
+anthropic==0.42.0
 langchain==0.3.14
 langchain-community==0.3.14
-langchain-core==0.3.29
+langchain-core==0.3.31
 langchain-text-splitters==0.3.4
 langchain-chroma==0.2.0
 langchain-huggingface==0.1.2
