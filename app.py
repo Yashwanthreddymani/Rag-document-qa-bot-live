@@ -24,7 +24,10 @@ import tempfile
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
+from streamlit_mic_recorder import mic_recorder
+from groq import Groq
 
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -117,6 +120,33 @@ def get_upload_history():
     return sorted(files.values(), key=lambda f: f["uploaded_at"], reverse=True)
 
 
+def transcribe_audio(audio_bytes: bytes, api_key: str) -> str:
+    """Send recorded audio to Groq's Whisper model and return the transcribed text."""
+    client = Groq(api_key=api_key)
+    transcript = client.audio.transcriptions.create(
+        file=("question.wav", audio_bytes),
+        model="whisper-large-v3-turbo",
+    )
+    return transcript.text.strip()
+
+
+def speak_text(text: str):
+    """Inject a tiny JS snippet that uses the browser's built-in speech synthesis
+    to read the given text aloud. Runs client-side, no extra API calls or cost."""
+    safe_text = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+    components.html(
+        f"""
+        <script>
+        const msg = new SpeechSynthesisUtterance("{safe_text}");
+        msg.rate = 1.0;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(msg);
+        </script>
+        """,
+        height=0,
+    )
+
+
 def load_file(file_path: str, suffix: str):
     if suffix == ".pdf":
         return PyPDFLoader(file_path).load()
@@ -193,6 +223,10 @@ with st.sidebar:
                 st.write(f"**Chunks indexed:** {f['chunks']}")
 
     st.divider()
+    st.header("🔊 Voice")
+    speak_answers = st.checkbox("Read answers aloud", value=False)
+
+    st.divider()
     if st.button("🗑️ Clear entire knowledge base"):
         import shutil
         if os.path.exists(PERSIST_DIRECTORY):
@@ -215,7 +249,22 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-question = st.chat_input("Ask a question about your documents...")
+col1, col2 = st.columns([6, 1])
+with col1:
+    typed_question = st.chat_input("Ask a question about your documents...")
+with col2:
+    audio = mic_recorder(start_prompt="🎤", stop_prompt="⏹️", just_once=True, key="mic")
+
+question = typed_question
+
+if audio and audio.get("bytes"):
+    with st.spinner("Transcribing your question..."):
+        try:
+            question = transcribe_audio(audio["bytes"], api_key)
+            st.caption(f"🎤 Heard: \"{question}\"")
+        except Exception as e:
+            st.error(f"❌ Could not transcribe audio: {e}")
+            question = None
 
 if question:
     st.session_state.messages.append({"role": "user", "content": question})
@@ -240,4 +289,6 @@ if question:
                 answer = f"❌ Error: {e}\n\nMake sure you've uploaded and indexed at least one document, and that your API key is valid."
 
         st.markdown(answer)
+        if speak_answers:
+            speak_text(answer)
     st.session_state.messages.append({"role": "assistant", "content": answer})
