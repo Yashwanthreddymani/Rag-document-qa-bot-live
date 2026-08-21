@@ -9,12 +9,16 @@ Deploy free:   push to GitHub -> https://share.streamlit.io (Streamlit Community
 
 import os
 import sys
+from datetime import datetime
 
+# Streamlit Cloud's Linux environment ships an SQLite version older than
+# ChromaDB requires. Swap in the pysqlite3-binary package before chromadb
+# is imported anywhere, or ChromaDB fails with a "tenant" connection error.
 try:
     __import__("pysqlite3")
     sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
 except ImportError:
-    pass
+    pass  # not needed locally on Windows/Mac, only on some Linux hosts
 
 import tempfile
 from pathlib import Path
@@ -87,6 +91,32 @@ def format_docs(docs):
     return "\n\n---\n\n".join(formatted)
 
 
+def get_upload_history():
+    """Read back every unique uploaded file and its stats from the vector store's metadata."""
+    try:
+        vectorstore = get_vectorstore()
+        raw = vectorstore._collection.get(include=["metadatas"])
+        metadatas = raw.get("metadatas", [])
+    except Exception:
+        return []
+
+    files = {}
+    for m in metadatas:
+        if not m:
+            continue
+        name = m.get("source", "unknown")
+        if name not in files:
+            files[name] = {
+                "name": name,
+                "uploaded_at": m.get("uploaded_at", "unknown"),
+                "size_kb": m.get("file_size_kb", "?"),
+                "chunks": 0,
+            }
+        files[name]["chunks"] += 1
+
+    return sorted(files.values(), key=lambda f: f["uploaded_at"], reverse=True)
+
+
 def load_file(file_path: str, suffix: str):
     if suffix == ".pdf":
         return PyPDFLoader(file_path).load()
@@ -111,8 +141,11 @@ def index_uploaded_files(uploaded_files):
 
             try:
                 docs = load_file(tmp_path, suffix)
+                upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 for d in docs:
                     d.metadata["source"] = uploaded_file.name  # keep clean filename, not temp path
+                    d.metadata["uploaded_at"] = upload_time
+                    d.metadata["file_size_kb"] = round(len(uploaded_file.getbuffer()) / 1024, 1)
                 chunks = splitter.split_documents(docs)
                 all_chunks.extend(chunks)
             except Exception as e:
@@ -146,6 +179,18 @@ with st.sidebar:
         with st.spinner("Reading, chunking, and embedding your documents..."):
             n = index_uploaded_files(uploaded_files)
         st.success(f"✅ Added {n} chunks from {len(uploaded_files)} file(s) to the knowledge base.")
+
+    st.divider()
+    st.header("🕒 Upload History")
+    history = get_upload_history()
+    if not history:
+        st.caption("No documents uploaded yet.")
+    else:
+        for f in history:
+            with st.expander(f"📄 {f['name']}"):
+                st.write(f"**Uploaded:** {f['uploaded_at']}")
+                st.write(f"**Size:** {f['size_kb']} KB")
+                st.write(f"**Chunks indexed:** {f['chunks']}")
 
     st.divider()
     if st.button("🗑️ Clear entire knowledge base"):
