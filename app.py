@@ -34,7 +34,7 @@ from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, Te
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-from langchain_anthropic import ChatAnthropic
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
@@ -44,8 +44,8 @@ load_dotenv()
 # ==================== CONFIGURATION ====================
 PERSIST_DIRECTORY = "chroma_db"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-LLM_MODEL = "claude-sonnet-4-6"       # Anthropic-hosted model, used for chat answers
-WHISPER_MODEL = "whisper-large-v3-turbo"  # Groq-hosted, used only for voice transcription
+CHAT_MODEL = "llama-3.3-70b-versatile"     # Groq-hosted, used for chat answers
+WHISPER_MODEL = "whisper-large-v3-turbo"   # Groq-hosted, used for voice transcription
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 TOP_K = 4
@@ -70,7 +70,7 @@ def get_vectorstore():
 
 
 def get_llm(api_key: str):
-    return ChatAnthropic(model=LLM_MODEL, temperature=0.3, api_key=api_key)
+    return ChatGroq(model=CHAT_MODEL, temperature=0.3, api_key=api_key)
 
 
 PROMPT = ChatPromptTemplate.from_template(
@@ -223,18 +223,12 @@ def index_uploaded_files(uploaded_files):
 with st.sidebar:
     st.header("⚙️ Setup")
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        api_key = st.text_input("Anthropic API key", type="password", help="Get a key at console.anthropic.com")
-    else:
-        st.success("Anthropic API key loaded from environment")
-
     groq_api_key = os.environ.get("GROQ_API_KEY", "")
     if not groq_api_key:
         groq_api_key = st.text_input(
-            "Groq API key (optional — for voice input)",
+            "Groq API key",
             type="password",
-            help="Get a free key at console.groq.com. Only needed if you want to ask questions by voice.",
+            help="Get a free key at console.groq.com. Used for both chat answers and voice transcription.",
         )
     else:
         st.success("Groq API key loaded from environment")
@@ -279,8 +273,8 @@ with st.sidebar:
 st.title("📚 RAG Document Q&A Bot")
 st.caption("Upload documents in the sidebar, then chat below — ask about your documents or anything else.")
 
-if not api_key:
-    st.info("👈 Enter an Anthropic API key in the sidebar to get started. Get one at console.anthropic.com")
+if not groq_api_key:
+    st.info("👈 Enter a Groq API key in the sidebar to get started. Get a free one at console.groq.com")
     st.stop()
 
 if "messages" not in st.session_state:
@@ -299,16 +293,13 @@ with col2:
 question = typed_question
 
 if audio and audio.get("bytes"):
-    if not groq_api_key:
-        st.error("❌ Voice input needs a Groq API key (for transcription). Add one in the sidebar.")
-    else:
-        with st.spinner("Transcribing your question..."):
-            try:
-                question = transcribe_audio(audio["bytes"], groq_api_key)
-                st.caption(f"🎤 Heard: \"{question}\"")
-            except Exception as e:
-                st.error(f"❌ Could not transcribe audio: {e}")
-                question = None
+    with st.spinner("Transcribing your question..."):
+        try:
+            question = transcribe_audio(audio["bytes"], groq_api_key)
+            st.caption(f"🎤 Heard: \"{question}\"")
+        except Exception as e:
+            st.error(f"❌ Could not transcribe audio: {e}")
+            question = None
 
 if question:
     st.session_state.messages.append({"role": "user", "content": question})
@@ -320,7 +311,7 @@ if question:
             try:
                 vectorstore = get_vectorstore()
                 retriever = vectorstore.as_retriever(search_kwargs={"k": TOP_K})
-                llm = get_llm(api_key)
+                llm = get_llm(groq_api_key)
 
                 # history excludes the message we just added, so it's only *prior* turns
                 history_text = format_history(st.session_state.messages[:-1])
@@ -337,7 +328,7 @@ if question:
                 )
                 answer = rag_chain.invoke(question)
             except Exception as e:
-                answer = f"❌ Error: {e}\n\nMake sure your API key is valid, and if this is a document question, that you've uploaded and indexed at least one file."
+                answer = f"❌ Error: {e}\n\nMake sure your Groq API key is valid, and if this is a document question, that you've uploaded and indexed at least one file."
 
         st.markdown(answer)
         if speak_answers:
