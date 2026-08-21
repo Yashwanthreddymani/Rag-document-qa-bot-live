@@ -45,7 +45,7 @@ load_dotenv()
 # ==================== CONFIGURATION ====================
 PERSIST_DIRECTORY = "chroma_db"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHAT_MODEL = "llama-3.3-70b-versatile"     # Groq-hosted, used for chat answers
+CHAT_MODEL = "llama-3.1-8b-instant"     # Groq-hosted, used for chat answers
 WHISPER_MODEL = "whisper-large-v3-turbo"   # Groq-hosted, used for voice transcription
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
