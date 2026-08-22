@@ -41,7 +41,7 @@ from langchain_core.output_parsers import StrOutputParser
 load_dotenv()
 
 # ==================== CONFIGURATION ====================
-PERSIST_DIRECTORY = "chroma_db"
+PERSIST_DIRECTORY = "chroma_db_v2"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 LLM_MODEL = "openai/gpt-oss-120b"   # Groq-hosted model, fast + free tier
 CHUNK_SIZE = 1000
