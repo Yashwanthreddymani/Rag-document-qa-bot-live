@@ -189,7 +189,7 @@ def index_uploaded_files(uploaded_files):
                 docs = load_file(tmp_path, suffix)
                 upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 for d in docs:
-                    d.metadata["source"] = uploaded_file.name  # keep clean filename, not temp path
+                    d.metadata["source"] = uploaded_file.name
                     d.metadata["uploaded_at"] = upload_time
                     d.metadata["file_size_kb"] = round(len(uploaded_file.getbuffer()) / 1024, 1)
                 chunks = splitter.split_documents(docs)
